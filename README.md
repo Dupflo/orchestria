@@ -15,15 +15,17 @@
 
 ---
 
-OrchestrIA is a conductor for AI agents. It spawns [Claude](https://claude.com)
-instances as long-lived, configurable agents, coordinates them across channels
-(Telegram, webhooks), schedules recurring missions, gives every agent scoped
-memory, and renders the whole thing as a live web dashboard — all running
-**locally**, with state in a single SQLite file you own.
+OrchestrIA is a conductor for AI agents that runs entirely on your own
+machine. It spawns [Claude](https://claude.com) instances as long-lived,
+configurable agents, coordinates them across channels (Telegram, webhooks),
+schedules recurring missions, gives every agent scoped memory, and renders the
+whole thing as a live web dashboard.
 
-It does **not** use a hosted API or the Anthropic SDK. OrchestrIA drives the
-official `claude` CLI over a pseudo-terminal, so authentication, model access
-and billing stay entirely inside your own Claude CLI session.
+**Nothing leaves your machine.** State lives in a single SQLite file you own —
+no cloud database, no external sync, no telemetry. And there is no hosted API
+or Anthropic SDK: OrchestrIA drives the official `claude` CLI over a
+pseudo-terminal, so model access and billing stay inside your existing Claude
+CLI session — no extra API key, no second bill.
 
 ## Why
 
@@ -31,6 +33,44 @@ Running a single coding agent is easy. Running *several* — each with its own
 role, tools, memory and triggers, and being able to *see* what they're all
 doing — is not. OrchestrIA is the missing control plane: agents become
 first-class objects you can create, wire together, schedule, and observe.
+
+## In practice — a daily briefing in 10 minutes
+
+A common first build: have an agent message you a briefing every morning on
+Telegram. End to end, with OrchestrIA's own primitives — no n8n, no external
+scheduler, no glue code.
+
+**1. Wire a Telegram channel.** Copy the template and drop in a BotFather token:
+
+```bash
+cp .orchestria/channels/telegram.json.example .orchestria/channels/telegram.json
+```
+
+```json
+{ "type": "telegram", "default_agent": "_main", "allowed_chat_ids": [], "bot_token": "<your-botfather-token>" }
+```
+
+**2. Schedule a routine.** A cron-style mission that runs an agent and pushes
+the result to the channel. Create it from the `/routines` dashboard, or via the
+API:
+
+```bash
+curl -X POST localhost:3000/api/routines -H 'content-type: application/json' -d '{
+  "id": "morning-brief",
+  "name": "Morning briefing",
+  "cron_expr": "0 8 * * *",
+  "agent_id": "_main",
+  "prompt": "Summarise yesterday: key signals, what needs my attention, one concrete suggested action. Be concise.",
+  "notify_on": "always",
+  "notify_channel": "telegram"
+}'
+```
+
+Every day at 08:00 the `_main` agent runs the prompt as a **tracked mission** —
+cost, tokens, duration and a full event log recorded — and Telegram pings you
+with the result. Swap the prompt, point it at your own agent, or fan out to
+several routines. Same pattern scales from a personal digest to a fleet of
+scheduled agents you can watch on the dashboard.
 
 ## Features
 
