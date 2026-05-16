@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- Add your logo at docs/logo.png (the orange/black "OrchestrIA" mark) -->
-<img src="docs/logo.png" alt="OrchestrIA" width="320" />
+<img src="public/logo.png" alt="OrchestrIA" width="320" />
 
 # OrchestrIA — Agentic OS
 
@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org)
-[![Node](https://img.shields.io/badge/Node-%E2%89%A518-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A520-brightgreen.svg)](https://nodejs.org)
 
 </div>
 
@@ -54,7 +54,7 @@ first-class objects you can create, wire together, schedule, and observe.
 
 ## Requirements
 
-- **Node.js ≥ 18**
+- **Node.js ≥ 20**
 - **The `claude` CLI** installed and on your `PATH`, authenticated once via
   `claude login`. ([Claude Code](https://claude.com/claude-code))
 - macOS or Linux (Windows via WSL — `node-pty` + `better-sqlite3` are native).
