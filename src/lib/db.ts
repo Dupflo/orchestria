@@ -3,12 +3,11 @@ import path from "path";
 import fs from "fs";
 
 const ORCHESTRIA_DIR = path.join(process.cwd(), ".orchestria");
-if (!fs.existsSync(ORCHESTRIA_DIR)) fs.mkdirSync(ORCHESTRIA_DIR, { recursive: true });
 
 /**
  * SQLite path: `ORCHESTRIA_SQLITE` (absolute or relative to cwd), else canonical
- * `<project>/.orchestria/orchestria.db`. A legacy root `orchestria.db` (from earlier builds) is
- * auto-migrated by `consolidateLegacyDb()` at boot.
+ * `<project>/.orchestria/orchestria.db`. Legacy DB locations are healed by
+ * `consolidateLegacyDb()` / `migrateFromMos()` on first `getDb()` call.
  */
 function resolveDbPath(): string {
   const cwd = process.cwd();
@@ -70,22 +69,23 @@ function migrateFromMos(): void {
   console.log("[orchestria] migrated .mos/mos.db → .orchestria/orchestria.db");
 }
 
-consolidateLegacyDb();
-migrateFromMos();
-const DB_PATH = resolveDbPath();
+function ensureColumn(db: Database.Database, table: string, name: string, def: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === name)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  }
+}
 
-let _db: Database.Database | null = null;
-
-export function getDb(): Database.Database {
-  if (_db) return _db;
-
-  _db = new Database(DB_PATH);
-  _db.pragma("journal_mode = WAL");
-  // Agents live on the filesystem (<project>/.orchestria/agents/<name>/), not in SQLite.
-  // FK enforcement off so legacy schemas with REFERENCES agents(id) keep working.
-  _db.pragma("foreign_keys = OFF");
-
-  _db.exec(`
+/**
+ * Idempotent schema application: creates tables/indexes if absent, adds any
+ * missing columns, heals legacy `routines` shapes (raw-SQL inserts used
+ * different column names), and backfills. Safe to run on every boot and on
+ * any historical schema state — it converges arbitrary drift to the current
+ * schema. Operates only on the given handle (no filesystem access), so it is
+ * unit-testable against an in-memory database.
+ */
+export function applySchema(db: Database.Database): void {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS missions (
       id          TEXT PRIMARY KEY,
       agent_id    TEXT NOT NULL,
@@ -156,55 +156,75 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_kanban_col ON kanban_cards(col);
   `);
 
-  ensureColumn(_db, "missions", "source_channel", "TEXT");
-  ensureColumn(_db, "missions", "source_meta", "TEXT");
-  ensureColumn(_db, "missions", "claude_session_id", "TEXT");
-  ensureColumn(_db, "missions", "kind", "TEXT NOT NULL DEFAULT 'mission'");
-  ensureColumn(_db, "missions", "routine_id", "TEXT");
-  ensureColumn(_db, "kanban_cards", "mission_id", "TEXT");
-  ensureColumn(_db, "kanban_cards", "not_before", "TEXT");
-  ensureColumn(_db, "kanban_cards", "description", "TEXT");
-  ensureColumn(_db, "kanban_cards", "notify_channel", "TEXT");
-  ensureColumn(_db, "kanban_cards", "notify_on", "TEXT NOT NULL DEFAULT 'never'");
-  ensureColumn(_db, "kanban_cards", "target_chat_ids", "TEXT");
+  ensureColumn(db, "missions", "source_channel", "TEXT");
+  ensureColumn(db, "missions", "source_meta", "TEXT");
+  ensureColumn(db, "missions", "claude_session_id", "TEXT");
+  ensureColumn(db, "missions", "kind", "TEXT NOT NULL DEFAULT 'mission'");
+  ensureColumn(db, "missions", "routine_id", "TEXT");
+  ensureColumn(db, "kanban_cards", "mission_id", "TEXT");
+  ensureColumn(db, "kanban_cards", "not_before", "TEXT");
+  ensureColumn(db, "kanban_cards", "description", "TEXT");
+  ensureColumn(db, "kanban_cards", "notify_channel", "TEXT");
+  ensureColumn(db, "kanban_cards", "notify_on", "TEXT NOT NULL DEFAULT 'never'");
+  ensureColumn(db, "kanban_cards", "target_chat_ids", "TEXT");
 
   // ── Migrate legacy `routines` schemas (some agents have inserted via raw SQL with different column names)
-  const routineCols = _db.prepare(`PRAGMA table_info(routines)`).all() as { name: string }[];
+  const routineCols = db.prepare(`PRAGMA table_info(routines)`).all() as { name: string }[];
   const rCols = new Set(routineCols.map((c) => c.name));
   if (rCols.has("title") && !rCols.has("name")) {
-    _db.exec(`ALTER TABLE routines RENAME COLUMN title TO name`);
+    db.exec(`ALTER TABLE routines RENAME COLUMN title TO name`);
   }
   if (rCols.has("cron") && !rCols.has("cron_expr")) {
-    _db.exec(`ALTER TABLE routines RENAME COLUMN cron TO cron_expr`);
+    db.exec(`ALTER TABLE routines RENAME COLUMN cron TO cron_expr`);
   }
   if (rCols.has("enabled") && !rCols.has("paused")) {
-    _db.exec(`ALTER TABLE routines ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
-    _db.exec(`UPDATE routines SET paused = CASE WHEN enabled = 0 THEN 1 ELSE 0 END`);
+    db.exec(`ALTER TABLE routines ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
+    db.exec(`UPDATE routines SET paused = CASE WHEN enabled = 0 THEN 1 ELSE 0 END`);
   }
-  ensureColumn(_db, "routines", "description", "TEXT");
-  ensureColumn(_db, "routines", "prompt",      "TEXT");
-  ensureColumn(_db, "routines", "skill_ref",   "TEXT");
-  ensureColumn(_db, "routines", "notify_on",   "TEXT NOT NULL DEFAULT 'failure'");
-  ensureColumn(_db, "routines", "last_status", "TEXT");
-  ensureColumn(_db, "routines", "next_run_ts", "INTEGER");
+  ensureColumn(db, "routines", "description", "TEXT");
+  ensureColumn(db, "routines", "prompt",      "TEXT");
+  ensureColumn(db, "routines", "skill_ref",   "TEXT");
+  ensureColumn(db, "routines", "notify_on",   "TEXT NOT NULL DEFAULT 'failure'");
+  ensureColumn(db, "routines", "last_status", "TEXT");
+  ensureColumn(db, "routines", "next_run_ts", "INTEGER");
   // JSON array of chat_ids to scope notifications to. null = broadcast to all subscribers.
-  ensureColumn(_db, "routines", "target_chat_ids", "TEXT");
+  ensureColumn(db, "routines", "target_chat_ids", "TEXT");
   // Fixed interval in seconds (overrides cron_expr when set — enables sub-minute scheduling).
-  ensureColumn(_db, "routines", "interval_seconds", "INTEGER");
+  ensureColumn(db, "routines", "interval_seconds", "INTEGER");
   // Backfill: any row created via legacy schema lacks prompt + next_run_ts.
   // - prompt: fall back to name so the scheduler has something to send
   // - next_run_ts: set to now so the scheduler picks it up on the next tick
-  _db.exec(`UPDATE routines SET prompt = name WHERE prompt IS NULL OR prompt = ''`);
-  _db.exec(`UPDATE routines SET next_run_ts = unixepoch() WHERE next_run_ts IS NULL AND paused = 0`);
+  db.exec(`UPDATE routines SET prompt = name WHERE prompt IS NULL OR prompt = ''`);
+  db.exec(`UPDATE routines SET next_run_ts = unixepoch() WHERE next_run_ts IS NULL AND paused = 0`);
 
-  _db.exec(`CREATE INDEX IF NOT EXISTS idx_missions_routine ON missions(routine_id);`);
-
-  return _db;
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_missions_routine ON missions(routine_id);`);
 }
 
-function ensureColumn(db: Database.Database, table: string, name: string, def: string): void {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === name)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+let _db: Database.Database | null = null;
+let _legacyHealed = false;
+
+/**
+ * Lazily open (and, on first call, heal legacy file locations + apply the
+ * schema). The legacy-file moves and schema application run here — never at
+ * module import — so importing this module has no filesystem side effects.
+ */
+export function getDb(): Database.Database {
+  if (_db) return _db;
+
+  if (!_legacyHealed) {
+    if (!fs.existsSync(ORCHESTRIA_DIR)) fs.mkdirSync(ORCHESTRIA_DIR, { recursive: true });
+    // File moves (not SQL) — must run before opening the DB at the resolved path.
+    consolidateLegacyDb();
+    migrateFromMos();
+    _legacyHealed = true;
   }
+
+  _db = new Database(resolveDbPath());
+  _db.pragma("journal_mode = WAL");
+  // Agents live on the filesystem (<project>/.orchestria/agents/<name>/), not in SQLite.
+  // FK enforcement off so legacy schemas with REFERENCES agents(id) keep working.
+  _db.pragma("foreign_keys = OFF");
+
+  applySchema(_db);
+  return _db;
 }
