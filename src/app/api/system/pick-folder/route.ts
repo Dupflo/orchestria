@@ -9,6 +9,11 @@ const execAsync = promisify(exec);
 
 /** Opens a native macOS folder picker via AppleScript and returns the chosen path. */
 export async function POST() {
+  // AppleScript is macOS-only. Elsewhere, signal the UI to fall back to a
+  // manual path input instead of failing with a confusing osascript ENOENT.
+  if (process.platform !== "darwin") {
+    return NextResponse.json({ path: null, unsupported: true });
+  }
   try {
     const { stdout } = await execAsync(
       `osascript -e 'POSIX path of (choose folder with prompt "Sélectionner le répertoire de travail :")'`

@@ -19,6 +19,15 @@ interface TokenRow {
   expires_at: number;
 }
 
+/**
+ * TRUSTED-PROXY ASSUMPTION. `isLocalhost` reads the `Host` header and
+ * `enforceHttps` reads `x-forwarded-proto` — both client-controllable. These
+ * gates are sound only when OrchestrIA is bound to localhost directly (the
+ * default, local-first deployment) OR sits behind a reverse proxy that
+ * overwrites these headers. Do NOT expose the raw server to an untrusted
+ * network without such a proxy: a client could spoof `Host: localhost` or
+ * `x-forwarded-proto: https` to bypass the localhost-only / https gates.
+ */
 export function isLocalhost(req: Request): boolean {
   const host = req.headers.get("host") ?? new URL(req.url).hostname;
   return host.startsWith("localhost") || host.startsWith("127.0.0.1") || host.startsWith("[::1]");

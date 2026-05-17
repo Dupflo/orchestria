@@ -36,6 +36,25 @@ This repo runs Next.js 16, which has breaking changes vs. older majors. Before
 writing framework code, check `node_modules/next/dist/docs/` and heed
 deprecation notices rather than relying on training-data assumptions.
 
+## Quality gates & deliberately deferred strictness
+
+CI hard-gates `lint` + `typecheck` + `test` (see `.github/workflows/ci.yml`).
+Two strictness levers are intentionally **not** enabled yet — each is a
+dedicated, individually-reviewed workstream, not a drive-by change:
+
+- **`eslint-plugin-react-hooks` React-Compiler rules** (`refs`, `purity`,
+  `set-state-in-effect`, `immutability`, `preserve-manual-memoization`) are
+  set to `warn` in `eslint.config.mjs`. The force-layout/animation hooks use
+  deliberate ref/mutation patterns; flip to `error` only if/when the project
+  adopts the React Compiler.
+- **`noUncheckedIndexedAccess`** is off. Enabling it surfaces ~112 sites
+  across ~19 files (mostly UI/hooks); adopting it well needs a focused pass
+  with the dev server up to verify the UI, not `!` sprinkled to silence it.
+- **Prettier** config + `npm run format` / `format:check` exist but the
+  repo-wide reformat is intentionally a separate, isolated commit (a 100-file
+  whitespace diff must not be bundled with logic changes), so `format:check`
+  is not yet a CI gate.
+
 ## Security rule (non-negotiable)
 
 Never commit secrets or third-party data: bot tokens, passwords, API keys,

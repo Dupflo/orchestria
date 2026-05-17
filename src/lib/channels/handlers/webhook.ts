@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type { WebhookChannelConfig } from "../types";
+import { assertPublicHttpUrl } from "../../net/ssrf";
 
 function getSecret(config: WebhookChannelConfig): string {
   const s = process.env[config.secret_env];
@@ -31,6 +32,15 @@ export interface WebhookCallbackPayload {
 }
 
 export async function postWebhookReply(replyUrl: string, body: WebhookCallbackPayload): Promise<void> {
+  // reply_url is caller-supplied (from the inbound webhook body). Block SSRF
+  // before fetching; a blocked URL is logged and skipped, never thrown, so a
+  // hostile reply_url can't break the mission-complete flow.
+  try {
+    await assertPublicHttpUrl(replyUrl);
+  } catch (e) {
+    console.error(`[webhook] blocked reply_url: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
   await fetch(replyUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
