@@ -1,4 +1,5 @@
 import { dueRoutines, markRoutineFired, getRoutine, type RoutineRow } from "./repo";
+import { expandRoutinePlaceholders } from "./fleetStats";
 import { registry } from "../orchestrator/registry";
 import { getDb } from "../db";
 import { tryLoadChannelConfig } from "../channels/config";
@@ -19,7 +20,8 @@ export function startScheduler(): boolean {
       const due = dueRoutines(nowSec);
       for (const r of due) {
         try {
-          const mission = r.skill_ref ? `${r.skill_ref}\n\n${r.prompt}` : r.prompt;
+          const prompt = expandRoutinePlaceholders(r.prompt);
+          const mission = r.skill_ref ? `${r.skill_ref}\n\n${prompt}` : prompt;
           registry.spawn(r.agent_id, mission, { kind: "mission", routineId: r.id, skipKanbanCard: true });
           // Set last_status to "running" optimistically; markRoutineFired updates next_run_ts
           markRoutineFired(r.id, "running");

@@ -72,6 +72,13 @@ with the result. Swap the prompt, point it at your own agent, or fan out to
 several routines. Same pattern scales from a personal digest to a fleet of
 scheduled agents you can watch on the dashboard.
 
+**Fleet digest.** Drop `{{FLEET_STATS}}` (or `{{FLEET_STATS:30}}` for a
+30-day window) anywhere in a routine prompt and the scheduler expands it, at
+fire time, into a real activity summary from your mission history — spend,
+volume and failures per agent. Schedule it weekly and an agent turns those
+numbers into a "what your fleet did, what to look at" digest in Telegram.
+The stats never leave your machine; they come straight from the local DB.
+
 ## Features
 
 - **Agent mesh** — define agents as folders (`config.json` + system prompt),
