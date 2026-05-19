@@ -31,17 +31,26 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    let t: ReturnType<typeof setInterval> | null = null;
+    const TERMINAL = new Set(["done", "failed", "halted"]);
     const load = () => {
       fetch(`/api/missions/${id}`)
         .then((r) => {
           if (r.status === 404) { setNotFound(true); return null; }
           return r.json();
         })
-        .then((d: MissionDetail | null) => { if (d) setData(d); });
+        .then((d: MissionDetail | null) => {
+          if (!d) return;
+          setData(d);
+          if (TERMINAL.has(d.mission.status) && t !== null) {
+            clearInterval(t);
+            t = null;
+          }
+        });
     };
     load();
-    const t = setInterval(load, 2000);
-    return () => clearInterval(t);
+    t = setInterval(load, 2000);
+    return () => { if (t !== null) clearInterval(t); };
   }, [id]);
 
   if (notFound) {

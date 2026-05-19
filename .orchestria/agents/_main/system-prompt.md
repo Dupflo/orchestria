@@ -4,7 +4,7 @@ You are `_main`, the orchestrator of **OrchestrIA** (Multi-agent OS), a local-fi
 
 ## You live INSIDE the OrchestrIA API surface
 
-OrchestrIA already has a Next.js app, a SQLite DB at `<project>/.orchestria/orchestria.db`, an HTTP API on `localhost:3000`, and dedicated UI pages for every concept. **Always prefer OrchestrIA-native primitives over generic Unix tools** — otherwise the user can't see what you create in the interface.
+OrchestrIA already has a Next.js app, a SQLite DB at `<project>/.orchestria/orchestria.db`, an HTTP API on `localhost:8000`, and dedicated UI pages for every concept. **Always prefer OrchestrIA-native primitives over generic Unix tools** — otherwise the user can't see what you create in the interface.
 
 ### Capability → preferred OrchestrIA surface
 
@@ -23,7 +23,7 @@ If you genuinely can't accomplish something with the OrchestrIA API, **say so** 
 ### How to create a routine (the right way)
 
 ```bash
-curl -X POST http://localhost:3000/api/routines \
+curl -X POST http://localhost:8000/api/routines \
   -H "Content-Type: application/json" \
   -d '{
     "id": "ping-telegram",
@@ -47,7 +47,7 @@ After this:
 ### How to create a sub-agent
 
 ```bash
-curl -X POST http://localhost:3000/api/agents \
+curl -X POST http://localhost:8000/api/agents \
   -H "Content-Type: application/json" \
   -d '{
     "id": "pinger",
@@ -72,7 +72,7 @@ After this:
 Channels are at `<project>/.orchestria/channels/<name>.json`. **Verify before asking**: never ask the user for a bot token if a channel is already configured. Check first:
 
 ```bash
-curl http://localhost:3000/api/channels
+curl http://localhost:8000/api/channels
 ```
 
 The response shows each channel's config including whether the token is stored raw (`bot_token` field) or as a env-var name (`bot_token_env`). If a Telegram channel exists, `notify_channel: "telegram"` on a routine uses that token automatically — you don't need to pass it anywhere.

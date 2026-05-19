@@ -60,3 +60,16 @@ next-env.d.ts
 # ── Secrets — channel credentials. Only *.json.example is tracked ───────────
 /.orchestria/channels/*.json
 !/.orchestria/channels/*.json.example
+
+# ── Private agents & skills: deny-all, allow only the OSS defaults ──────────
+# Every agent/skill is personal/client by default (real secrets & client
+# data: bank PIN, WP password, Google key, Telegram token, contracts). Only
+# the `_main` + `pinger` demo agents ship publicly. Adding a new private
+# agent/skill needs NO change here — it's ignored automatically.
+/.orchestria/agents/*
+!/.orchestria/agents/_main/
+!/.orchestria/agents/pinger/
+/.orchestria/skills/*
+# Re-exclude runtime state even inside the public defaults (last match wins).
+/.orchestria/agents/*/memory/
+/.orchestria/agents/*/logs/

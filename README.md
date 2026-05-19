@@ -55,7 +55,7 @@ the result to the channel. Create it from the `/routines` dashboard, or via the
 API:
 
 ```bash
-curl -X POST localhost:3000/api/routines -H 'content-type: application/json' -d '{
+curl -X POST localhost:8000/api/routines -H 'content-type: application/json' -d '{
   "id": "morning-brief",
   "name": "Morning briefing",
   "cron_expr": "0 8 * * *",
@@ -124,7 +124,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open <http://localhost:3000>. The default `_main` orchestrator agent and a
+Open <http://localhost:8000>. The default `_main` orchestrator agent and a
 minimal `pinger` sub-agent ship ready to use.
 
 > Production build: `npm run build && npm run start`.
