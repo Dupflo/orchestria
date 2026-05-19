@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import type { AgentFileConfig, MemoryScope } from "./types";
+import type { AgentFileConfig, MemoryScope, ProviderId } from "./types";
 
 export const ORCHESTRIA_HOME = path.join(process.cwd(), ".orchestria");
 /** Cross-project, user-wide memory store. */
@@ -34,9 +34,13 @@ export function loadAgentConfig(name: string): AgentFileConfig {
   }
   const raw = fs.readFileSync(file, "utf8");
   const parsed = JSON.parse(raw) as Partial<AgentFileConfig> & { permission_mode?: string };
+  // Normalize here (not via getProvider's strict lookup) so a typo'd provider
+  // in config falls back to claude instead of throwing and killing the mission.
+  const provider: ProviderId = parsed.provider === "openai" ? "openai" : "claude";
   return {
     cwd: parsed.cwd?.replace(/^~/, os.homedir()) ?? os.homedir(),
     model: parsed.model ?? "sonnet",
+    provider,
     permissionMode: (parsed.permissionMode ?? parsed.permission_mode ?? "auto") as AgentFileConfig["permissionMode"],
     allowedTools: parsed.allowedTools,
     deniedTools: parsed.deniedTools,

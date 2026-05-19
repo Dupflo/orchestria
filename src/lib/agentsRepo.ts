@@ -137,11 +137,18 @@ export function listClaudeAgents(): AgentConfig[] {
   return results;
 }
 
+type Provider = "claude" | "openai";
+
+function normProvider(v: unknown): Provider {
+  return v === "openai" ? "openai" : "claude";
+}
+
 interface RawConfig {
   id?: string;
   name?: string;
   glyph?: string;
   model?: string;
+  provider?: string;
   permissionMode?: string;
   permission_mode?: string;
   cwd?: string;
@@ -165,6 +172,7 @@ function toAgentConfig(name: string, raw: RawConfig): AgentConfig {
     name: raw.name ?? name,
     glyph: raw.glyph,
     model: raw.model ?? "claude-sonnet-4-6",
+    provider: normProvider(raw.provider),
     permissionMode: (raw.permissionMode ?? raw.permission_mode ?? "auto") as AgentConfig["permissionMode"],
     systemPrompt: readSystemPrompt(name),
     cwd: raw.cwd ?? "~",
@@ -205,6 +213,7 @@ export interface CreateAgentInput {
   id: string;
   name?: string;
   model?: string;
+  provider?: Provider;
   permissionMode?: AgentConfig["permissionMode"];
   systemPrompt?: string;
   cwd?: string;
@@ -228,6 +237,7 @@ export function createAgent(input: CreateAgentInput): AgentConfig {
     id: input.id,
     name: input.name ?? input.id,
     model: input.model ?? "claude-sonnet-4-6",
+    provider: normProvider(input.provider),
     permissionMode: input.permissionMode ?? "auto",
     cwd: input.cwd ?? "~",
     allowedTools: input.allowedTools ?? [],
@@ -244,6 +254,7 @@ export interface UpdateAgentInput {
   name?: string;
   glyph?: string;
   model?: string;
+  provider?: Provider;
   permissionMode?: AgentConfig["permissionMode"];
   systemPrompt?: string;
   cwd?: string;
@@ -262,6 +273,7 @@ export function updateAgent(id: string, patch: UpdateAgentInput): AgentConfig | 
   if (patch.name !== undefined)            raw.name = patch.name;
   if (patch.glyph !== undefined)           raw.glyph = patch.glyph;
   if (patch.model !== undefined)           raw.model = patch.model;
+  if (patch.provider !== undefined)        raw.provider = normProvider(patch.provider);
   if (patch.permissionMode !== undefined)  raw.permissionMode = patch.permissionMode;
   if (patch.cwd !== undefined)             raw.cwd = patch.cwd;
   if (patch.allowedTools !== undefined)    raw.allowedTools = patch.allowedTools;

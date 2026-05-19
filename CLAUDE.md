@@ -9,9 +9,10 @@ dashboard.
 - `src/app/` — Next.js App Router pages (`/visualizer`, `/chat`, `/missions`,
   `/dashboard`, `/agents`, `/skills`, `/memory`, `/kanban`, `/routines`) and
   `src/app/api/*` route handlers.
-- `src/lib/orchestrator/` — agent spawning (`agent.ts` drives the `claude` CLI
-  over a `node-pty` pseudo-terminal — there is **no Anthropic SDK**), the
-  registry, and config/memory loading.
+- `src/lib/orchestrator/` — agent spawning (`agent.ts` drives an agentic CLI
+  over a `node-pty` pseudo-terminal — there is **no SDK**), the registry,
+  config/memory loading, and `providers/` (the pluggable per-agent backend:
+  `claude` drives the `claude` CLI, `openai` drives `codex exec --json`).
 - `src/lib/db.ts` — SQLite (`better-sqlite3`), WAL mode. Schema: `missions`,
   `events`, `kanban_cards`, `routines`, `remote_tokens`.
 - `src/lib/channels/` — Telegram + webhook inbound, routing via `@agent` tags.
@@ -25,6 +26,13 @@ dashboard.
 - An agent is a directory `.orchestria/agents/<id>/` with `config.json` and an
   optional `system-prompt.md`. The source tree has **no hardcoded agent/skill
   names** — discovery is filesystem-driven.
+- `config.json` may set `"provider": "claude" | "openai"` (default `claude`,
+  so existing agents are unchanged). An unknown/typo value falls back to
+  `claude` rather than failing the mission. The `openai` provider needs the
+  `codex` CLI on PATH; its model defaults to the `codex` CLI's own unless the
+  agent's `model` is a non-Claude id or `ORCHESTRIA_OPENAI_MODEL` is set.
+  Adding a provider = one file in `src/lib/orchestrator/providers/` + an entry
+  in its `index.ts` registry; nothing else is provider-aware.
 - The internal discriminant for OrchestrIA-managed agents is
   `source: "orchestria"` (vs `"skill"` / `"agent"`).
 - Path constants are centralized in `src/lib/orchestrator/config.ts`

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { SpawnedAgent } from "./agent";
+import { getProvider } from "./providers";
 import { loadAgentConfig, loadSystemPrompt, loadMemory, ensureLogsDir, ORCHESTRIA_HOME } from "./config";
 import { sseBroadcast } from "./sse";
 import { getDb } from "../db";
@@ -58,6 +59,7 @@ class AgentRegistry {
       );
     }
     const config = loadAgentConfig(agentName);
+    const provider = getProvider(config.provider);
     const scope = config.memoryScope ?? "USER";
     const systemPrompt = loadSystemPrompt(agentName) + loadMemory(agentName, scope);
     const missionId = newMissionId();
@@ -73,7 +75,7 @@ class AgentRegistry {
        VALUES (?, ?, ?, 'running', unixepoch(), unixepoch(), ?, ?, ?, ?)`
     ).run(missionId, agentName, mission, sourceChannel, sourceMeta ? JSON.stringify(sourceMeta) : null, kind, opts.routineId ?? null);
 
-    const agent = new SpawnedAgent(missionId, agentName, config, systemPrompt, mission, resumeSessionId);
+    const agent = new SpawnedAgent(missionId, agentName, provider, config, systemPrompt, mission, resumeSessionId);
     this.live.set(missionId, agent);
 
     const timeoutTimer = setTimeout(() => {
@@ -104,14 +106,11 @@ class AgentRegistry {
       insertEvent.run(missionId, agentName, Math.floor(ev.timestamp / 1000), ev.type, JSON.stringify(ev.payload));
       sseBroadcast(missionId, ev, agentName);
       this.appendLog(agentName, ev);
-      // Capture cost & token usage from `result` events emitted by the Claude CLI
-      if (ev.type === "result") {
-        const p = ev.payload as Record<string, unknown>;
-        const cost = typeof p.total_cost_usd === "number" ? p.total_cost_usd : null;
-        const usage = p.usage as Record<string, unknown> | null | undefined;
-        const tokIn = typeof usage?.input_tokens === "number" ? usage.input_tokens : null;
-        const tokOut = typeof usage?.output_tokens === "number" ? usage.output_tokens : null;
-        if (cost !== null) updateCost.run(cost, tokIn ?? 0, tokOut ?? 0, missionId);
+      // Cost & token usage extraction is provider-specific (Claude reports a
+      // USD cost on its `result` event; Codex reports token counts only).
+      const usage = provider.usageFrom(ev);
+      if (usage) {
+        updateCost.run(usage.costUsd ?? 0, usage.tokensIn ?? 0, usage.tokensOut ?? 0, missionId);
       }
     });
 

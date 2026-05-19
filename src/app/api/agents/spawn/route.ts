@@ -1,22 +1,24 @@
 import { NextResponse } from "next/server";
 import { readJson } from "@/lib/api/json";
-import { execSync } from "child_process";
 import { registry } from "@/lib/orchestrator/registry";
+import { getProvider, binOnPath, PROVIDERS } from "@/lib/orchestrator/providers";
+import { loadAgentConfig } from "@/lib/orchestrator/config";
+import type { AgentProvider } from "@/lib/orchestrator/providers";
 import type { SpawnRequest } from "@/lib/orchestrator/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function claudeOnPath(): { ok: boolean; path?: string } {
+/** Resolve which CLI an agent needs, or null if the agent does not exist. */
+function providerForAgent(agentName: string): AgentProvider | null {
   try {
-    const p = execSync("command -v claude", { encoding: "utf8" }).trim();
-    return p ? { ok: true, path: p } : { ok: false };
+    return getProvider(loadAgentConfig(agentName).provider);
   } catch {
-    return { ok: false };
+    return null;
   }
 }
 
-function explainSpawnError(e: unknown): { status: number; message: string; hint?: string } {
+function explainSpawnError(e: unknown, bin: string): { status: number; message: string; hint?: string } {
   const msg = e instanceof Error ? e.message : String(e);
 
   if (msg.includes("not found") && msg.includes("config.json")) {
@@ -29,8 +31,8 @@ function explainSpawnError(e: unknown): { status: number; message: string; hint?
   if (msg.includes("ENOENT") && msg.includes("posix_spawn")) {
     return {
       status: 503,
-      message: "could not spawn `claude` CLI",
-      hint: "Install Claude Code and make sure `which claude` works in your shell.",
+      message: `could not spawn the \`${bin}\` CLI`,
+      hint: `Install it and make sure \`which ${bin}\` works in your shell.`,
     };
   }
   if (msg.includes("ENOENT")) {
@@ -53,15 +55,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "agent_name and mission are required" }, { status: 400 });
   }
 
-  const claude = claudeOnPath();
-  if (!claude.ok) {
-    return NextResponse.json(
-      {
-        error: "`claude` CLI not on PATH",
-        hint: "Install Claude Code (`claude` command) and restart the dev server so it inherits the right PATH.",
-      },
-      { status: 503 },
-    );
+  // Pre-flight the right CLI based on the agent's provider so the user gets a
+  // clear 503 instead of a cryptic posix_spawn failure mid-run.
+  const provider = providerForAgent(body.agent_name);
+  if (provider) {
+    const cli = binOnPath(provider.bin);
+    if (!cli.ok) {
+      return NextResponse.json(
+        {
+          error: `\`${provider.bin}\` CLI not on PATH (required by ${provider.label})`,
+          hint: `Install ${provider.label} (\`${provider.bin}\` command) and restart the dev server so it inherits the right PATH.`,
+        },
+        { status: 503 },
+      );
+    }
   }
 
   try {
@@ -76,17 +83,21 @@ export async function POST(req: Request) {
       {
         mission_id: agent.missionId,
         agent_name: agent.agentName,
+        provider: agent.provider.id,
         status: agent.status,
         started_at: agent.startedAt,
       },
       { status: 201 },
     );
   } catch (e) {
-    const { status, message, hint } = explainSpawnError(e);
+    const { status, message, hint } = explainSpawnError(e, provider?.bin ?? "claude");
     return NextResponse.json({ error: message, hint }, { status });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ live: registry.list(), claude: claudeOnPath() });
+  const providers = Object.fromEntries(
+    Object.values(PROVIDERS).map((p) => [p.id, { ...binOnPath(p.bin), bin: p.bin, label: p.label }]),
+  );
+  return NextResponse.json({ live: registry.list(), providers });
 }

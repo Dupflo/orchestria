@@ -42,6 +42,8 @@ export interface AgentConfig {
   /** Single-character display glyph shown on cards / mesh nodes */
   glyph?: string;
   model: string;
+  /** Which AI CLI backs this agent (defaults to "claude"). */
+  provider?: "claude" | "openai";
   permissionMode: PermissionMode;
   systemPrompt: string;
   cwd: string;

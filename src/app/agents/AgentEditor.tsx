@@ -9,6 +9,13 @@ import ChannelsSection from "./ChannelsSection";
 
 const GLYPHS = ["◆", "◇", "▲", "◈", "●", "■", "◐", "◉", "✦", "△", "□", "◊", "♦", "◎"];
 
+type Provider = "claude" | "openai";
+
+const PROVIDERS = [
+  { id: "claude" as const, label: "CLAUDE", sub: "claude cli" },
+  { id: "openai" as const, label: "OPENAI", sub: "codex cli" },
+];
+
 const MODELS = [
   { id: "inherit",                       label: "INHERIT", sub: "parent" },
   { id: "claude-haiku-4-5-20251001",     label: "HAIKU",   sub: "cheap" },
@@ -101,6 +108,7 @@ export default function AgentEditor({
   const [name, setName] = useState("");
   const [glyph, setGlyph] = useState("◆");
   const [cwd, setCwd] = useState("~");
+  const [provider, setProvider] = useState<Provider>("claude");
   const [model, setModel] = useState("claude-sonnet-4-6");
   const [permissionMode, setPermissionMode] = useState<AgentConfig["permissionMode"]>("auto");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -133,7 +141,7 @@ export default function AgentEditor({
       // Reset to empty create-state when switching to "new" mode
       setCfg(null); setLoading(false); setError(null);
       setNewId(""); setName(""); setGlyph("◆"); setCwd("~");
-      setModel("claude-sonnet-4-6"); setPermissionMode("auto");
+      setProvider("claude"); setModel("claude-sonnet-4-6"); setPermissionMode("auto");
       setSystemPrompt(""); setAllowedTools(["Bash", "Read", "Edit", "Write"]);
       setMemoryScope("USER"); setSkills([]);
       return;
@@ -152,6 +160,7 @@ export default function AgentEditor({
         setName(data.name);
         setGlyph(data.glyph || data.name.charAt(0).toUpperCase() || "◆");
         setCwd(data.cwd);
+        setProvider(data.provider ?? "claude");
         setModel(data.model);
         setPermissionMode(data.permissionMode);
         setSystemPrompt(data.systemPrompt);
@@ -174,18 +183,19 @@ export default function AgentEditor({
       name !== cfg.name ||
       glyph !== cfgGlyph ||
       cwd !== cfg.cwd ||
+      provider !== (cfg.provider ?? "claude") ||
       model !== cfg.model ||
       permissionMode !== cfg.permissionMode ||
       systemPrompt !== cfg.systemPrompt ||
       JSON.stringify(allowedTools) !== JSON.stringify(cfg.allowedTools) ||
       memoryScope !== (cfg.memoryScope ?? "USER")
     );
-  }, [isNew, newId, cfg, name, glyph, cwd, model, permissionMode, systemPrompt, allowedTools, memoryScope]);
+  }, [isNew, newId, cfg, name, glyph, cwd, provider, model, permissionMode, systemPrompt, allowedTools, memoryScope]);
 
   const reset = () => {
     if (isNew) {
       setNewId(""); setName(""); setGlyph("◆"); setCwd("~");
-      setModel("claude-sonnet-4-6"); setPermissionMode("auto");
+      setProvider("claude"); setModel("claude-sonnet-4-6"); setPermissionMode("auto");
       setSystemPrompt(""); setAllowedTools(["Bash", "Read", "Edit", "Write"]);
       setMemoryScope("USER"); setError(null);
       return;
@@ -193,7 +203,7 @@ export default function AgentEditor({
     if (!cfg) return;
     setName(cfg.name);
     setGlyph(cfg.glyph || cfg.name.charAt(0).toUpperCase() || "◆");
-    setCwd(cfg.cwd); setModel(cfg.model);
+    setCwd(cfg.cwd); setProvider(cfg.provider ?? "claude"); setModel(cfg.model);
     setPermissionMode(cfg.permissionMode); setSystemPrompt(cfg.systemPrompt);
     setAllowedTools(cfg.allowedTools);
     setMemoryScope(cfg.memoryScope ?? "USER");
@@ -215,7 +225,7 @@ export default function AgentEditor({
         body: JSON.stringify({
           id: cleanId,
           name: name.trim() || cleanId,
-          glyph, cwd, model, permissionMode,
+          glyph, cwd, provider, model, permissionMode,
           systemPrompt, allowedTools, memoryScope, skills,
         }),
       });
@@ -234,7 +244,7 @@ export default function AgentEditor({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name, glyph, cwd, model, permissionMode,
+        name, glyph, cwd, provider, model, permissionMode,
         systemPrompt, allowedTools, memoryScope, skills,
       }),
     });
@@ -389,8 +399,31 @@ export default function AgentEditor({
           <section className="section">
             <SectionHeader num="02" title="Model & memory" sub="cc subagent settings" />
             <div className="field" style={{ marginBottom: 14 }}>
+              <label className="field-label">Provider <span style={{ color: "var(--text-faint)", textTransform: "lowercase", letterSpacing: 0 }}>which AI CLI runs this agent</span></label>
+              <PillGroup
+                value={provider}
+                options={PROVIDERS}
+                onChange={(v) => {
+                  setProvider(v);
+                  // Keep the model field meaningful when switching backends.
+                  if (v === "openai" && /^(claude|inherit)/.test(model)) setModel("");
+                  if (v === "claude" && !/^claude/.test(model)) setModel("claude-sonnet-4-6");
+                }} />
+            </div>
+            <div className="field" style={{ marginBottom: 14 }}>
               <label className="field-label">Model</label>
-              <PillGroup value={model} options={MODELS} onChange={setModel} />
+              {provider === "claude" ? (
+                <PillGroup value={model} options={MODELS} onChange={setModel} />
+              ) : (
+                <>
+                  <input className="input mono" value={model} placeholder="codex default"
+                    onChange={(e) => setModel(e.target.value)} />
+                  <div className="field-hint">
+                    OpenAI/Codex model id (e.g. <code>gpt-5-codex</code>). Leave empty to use the
+                    {" "}<code>codex</code> CLI default, or set <code>ORCHESTRIA_OPENAI_MODEL</code> to override globally.
+                  </div>
+                </>
+              )}
             </div>
             <div className="field" style={{ marginBottom: 14 }}>
               <label className="field-label">Memory scope <span style={{ color: "var(--text-faint)", textTransform: "lowercase", letterSpacing: 0 }}>cross-session learnings</span></label>
