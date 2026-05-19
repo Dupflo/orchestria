@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -21,7 +22,14 @@ export default function Topbar() {
   return (
     <header className="os-top">
       <div className="os-brand">
-        <div className="os-brand-mark" />
+        <Image
+          className="os-brand-logo"
+          src="/logo.png"
+          alt="OrchestrIA"
+          width={22}
+          height={22}
+          priority
+        />
         <div>
           <div className="os-brand-name">
             OrchestrIA <span className="os-brand-sub mono">0.42.1</span>
