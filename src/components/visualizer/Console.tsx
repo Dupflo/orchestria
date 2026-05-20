@@ -11,9 +11,10 @@ interface Props {
   setFilter: (f: FilterKey) => void;
   focusAgent: string | null;
   onPickAgent: (id: string | null) => void;
+  onClear?: () => void;
 }
 
-export default function Console({ events, filter, setFilter, focusAgent, onPickAgent }: Props) {
+export default function Console({ events, filter, setFilter, focusAgent, onPickAgent, onClear }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [autoscroll, setAutoscroll] = useState(true);
 
@@ -62,6 +63,15 @@ export default function Console({ events, filter, setFilter, focusAgent, onPickA
               style={{ accentColor: "#E07A5F", width: 11, height: 11 }} />
             auto-scroll
           </label>
+          {onClear && (
+            <button
+              className="ftab"
+              onClick={onClear}
+              title="Clear the kernel: reset mesh activity and event log"
+              style={{ marginLeft: 6, cursor: "pointer", border: 0, background: "transparent", color: "var(--text-faint)" }}>
+              <span style={{ marginRight: 4 }}>×</span>clear
+            </button>
+          )}
         </div>
       </div>
       <div className="console-body" ref={bodyRef}>

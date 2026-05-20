@@ -232,6 +232,21 @@ export default function VisualizerApp() {
     zoomRef.current = api;
   }, []);
 
+  const clearKernel = useCallback(async () => {
+    // Empty the event log and bring every agent back to idle. Existing pulses
+    // are not torn down explicitly — once their source agent is idle, useTraffic
+    // stops spawning new ones and the in-flight pulses fade out within ~1s.
+    setEvents([]);
+    setAgentMap((prev) => {
+      const next: Record<string, AgentLiveState> = {};
+      for (const [id, a] of Object.entries(prev)) next[id] = { ...a, status: "idle" };
+      return next;
+    });
+    // Best-effort flush of the server replay buffer so the *next* time the
+    // page is opened it does not re-hydrate stale activity.
+    await fetch("/api/live/clear", { method: "POST" }).catch(() => { /* non-fatal */ });
+  }, []);
+
   return (
     <div className="viz-root">
       <AgentGraph
@@ -284,6 +299,7 @@ export default function VisualizerApp() {
           setFilter={setFilter}
           focusAgent={consoleFocus}
           onPickAgent={setConsoleFocus}
+          onClear={clearKernel}
         />
       </div>
 
