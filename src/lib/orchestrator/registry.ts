@@ -127,12 +127,17 @@ class AgentRegistry {
       insertEvent.run(missionId, agentName, Math.floor(closing.timestamp / 1000), closing.type, JSON.stringify(closing.payload));
       sseBroadcast(missionId, closing, agentName);
       this.live.delete(missionId);
-      // On mission complete, we DON'T auto-promote the card to "done" — the user keeps
-      // manual control of the column. We only tag failures so the UI can show a red badge.
-      // (Previously col was forced to "done", causing cards to jump straight to done when
-      // missions were fast.)
-      if (kind !== "chat" && finalStatus === "failed") {
-        updateCardByMissionId(missionId, { tags: ["failed"] });
+      // On mission complete, sync the kanban card with the mission outcome:
+      // success → move the card to the `done` column, failure → keep it where
+      // it is but tag it red so the UI shows the regression. Channel-spawned
+      // chats don't have a card (kind === "chat") and `skipKanbanCard` is set
+      // when the caller (e.g. the Board) owns its own card.
+      if (kind !== "chat" && !opts.skipKanbanCard) {
+        if (finalStatus === "failed") {
+          updateCardByMissionId(missionId, { tags: ["failed"] });
+        } else {
+          updateCardByMissionId(missionId, { col: "done" });
+        }
       }
       for (const l of this.completionListeners) {
         l({ missionId, agentName, status: finalStatus, sourceChannel, sourceMeta });
