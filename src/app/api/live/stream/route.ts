@@ -1,4 +1,4 @@
-import { sseSubscribeGlobal } from "@/lib/orchestrator/sse";
+import { sseSubscribeGlobal, sseRecentBroadcasts } from "@/lib/orchestrator/sse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +10,14 @@ export async function GET(req: Request) {
       const write = (data: unknown) => {
         controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
+
+      // Replay the recent-broadcast snapshot before going live so a client
+      // landing on the visualizer sees the last few events instead of an
+      // empty mesh. `replay: true` lets the client treat them differently
+      // (e.g. skip a sound, no autoscroll spike).
+      for (const r of sseRecentBroadcasts()) {
+        write({ missionId: r.missionId, agentId: r.agentId, event: r.event, replay: true });
+      }
 
       const unsubscribe = sseSubscribeGlobal(({ missionId, agentId, event }) => {
         write({ missionId, agentId, event });
