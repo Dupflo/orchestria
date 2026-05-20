@@ -12,6 +12,7 @@ const NAV_TABS = [
   { label: "Missions",  href: "/missions" },
   { label: "Board",     href: "/kanban" },
   { label: "Skills",    href: "/skills" },
+  { label: "Channels",  href: "/channels" },
   { label: "Routines",  href: "/routines" },
   { label: "Dashboard", href: "/dashboard" },
 ];
