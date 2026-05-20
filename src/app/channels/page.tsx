@@ -95,8 +95,14 @@ function ChannelEditor({ name, initial, agents, running, subscribers, onSaved, o
   );
 
   // Discord
+  const [dcAppId, setDcAppId] = useState(
+    initial?.config.type === "discord" ? (initial.config.application_id ?? "") : ""
+  );
+  const [dcPublicKeyEnv, setDcPublicKeyEnv] = useState(
+    initial?.config.type === "discord" ? (initial.config.public_key_env ?? "DISCORD_PUBLIC_KEY") : "DISCORD_PUBLIC_KEY"
+  );
   const [dcToken, setDcToken] = useState(
-    initial?.config.type === "discord" ? (initial.config.bot_token_env ?? "") : ""
+    initial?.config.type === "discord" ? (initial.config.bot_token_env ?? "DISCORD_BOT_TOKEN") : "DISCORD_BOT_TOKEN"
   );
   const [dcGuild, setDcGuild] = useState(initial?.config.type === "discord" ? (initial.config.guild_id ?? "") : "");
   const [dcChannel, setDcChannel] = useState(initial?.config.type === "discord" ? (initial.config.channel_id ?? "") : "");
@@ -150,9 +156,13 @@ function ChannelEditor({ name, initial, agents, running, subscribers, onSaved, o
         ...(ids.length ? { allowed_chat_ids: ids } : {}),
       };
     } else if (type === "discord") {
-      if (!dcToken.trim()) { setError("bot token env var requis"); return; }
+      if (!dcAppId.trim()) { setError("application_id requis (Discord developer portal → General Information)"); return; }
+      if (!dcPublicKeyEnv.trim()) { setError("public_key_env requis"); return; }
+      if (!dcToken.trim()) { setError("bot_token_env requis"); return; }
       config = {
         type, default_agent: defaultAgent, ...routingField,
+        application_id: dcAppId.trim(),
+        public_key_env: dcPublicKeyEnv.trim(),
         bot_token_env: dcToken.trim(),
         ...(dcGuild.trim() ? { guild_id: dcGuild.trim() } : {}),
         ...(dcChannel.trim() ? { channel_id: dcChannel.trim() } : {}),
@@ -284,13 +294,21 @@ function ChannelEditor({ name, initial, agents, running, subscribers, onSaved, o
 
         {type === "discord" && (
           <>
-            <Field label="BOT TOKEN ENV VAR" hint="Nom de la variable d'env contenant le token du bot Discord.">
+            <Field label="APPLICATION ID" hint="Discord developer portal → General Information → Application ID. C'est public, donc OK de l'inscrire dans la config.">
+              <input className="input mono" placeholder="123456789012345678"
+                value={dcAppId} onChange={(e) => setDcAppId(e.target.value)} />
+            </Field>
+            <Field label="PUBLIC KEY ENV VAR" hint="Nom de la variable d'env contenant la clé publique Ed25519 (32 octets hex, depuis General Information).">
+              <input className="input mono" placeholder="DISCORD_PUBLIC_KEY"
+                value={dcPublicKeyEnv} onChange={(e) => setDcPublicKeyEnv(e.target.value)} />
+            </Field>
+            <Field label="BOT TOKEN ENV VAR" hint="Nom de la variable d'env contenant le bot token (Bot → Token). Utilisé en fallback si l'interaction expire avant la fin de la mission.">
               <input className="input mono"
                 type={dcTokenLooksRaw ? "password" : "text"}
                 value={dcToken} onChange={(e) => setDcToken(e.target.value)}
                 placeholder="DISCORD_BOT_TOKEN" />
             </Field>
-            <Field label="GUILD ID (optionnel)" hint="Restreindre le bot à un serveur Discord.">
+            <Field label="GUILD ID (optionnel)" hint="Restreindre le bot à un serveur Discord donné.">
               <input className="input mono" placeholder="123456789012345678"
                 value={dcGuild} onChange={(e) => setDcGuild(e.target.value)} />
             </Field>
@@ -299,7 +317,8 @@ function ChannelEditor({ name, initial, agents, running, subscribers, onSaved, o
                 value={dcChannel} onChange={(e) => setDcChannel(e.target.value)} />
             </Field>
             <div style={{ padding: "8px 12px", background: "rgba(88,101,242,0.08)", border: "1px solid rgba(88,101,242,0.2)", borderRadius: 4, fontSize: 11, color: "var(--text-faint)", lineHeight: 1.5 }}>
-              ℹ Le handler Discord arrive dans le prochain commit. La config est saved mais aucun bot ne tourne encore.
+              ℹ Mode <strong>slash-commands</strong> : enregistre une commande côté Discord pointant l&apos;<em>Interactions Endpoint URL</em> vers{" "}
+              <code className="mono">https://&lt;ton-hote&gt;/api/channels/{isNew ? draftName || "&lt;name&gt;" : name}/inbound</code>. La vérif de signature Ed25519 est faite à chaque requête.
             </div>
           </>
         )}

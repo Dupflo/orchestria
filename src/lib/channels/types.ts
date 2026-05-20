@@ -30,10 +30,17 @@ export interface WebhookChannelConfig extends BaseChannelConfig {
 
 export interface DiscordChannelConfig extends BaseChannelConfig {
   type: "discord";
+  /** Discord application id — used to build interaction follow-up URLs. Public.
+   *  Required for the slash-command handler; legacy configs may omit it. */
+  application_id?: string;
+  /** Env var holding the bot token (needed for fallback channel sends). */
   bot_token_env: string;
-  /** Optional: restrict to a specific guild */
+  /** Env var holding the application's Ed25519 public key (32-byte hex).
+   *  Required for the slash-command handler; legacy configs may omit it. */
+  public_key_env?: string;
+  /** Optional: restrict to a specific guild. */
   guild_id?: string;
-  /** Optional: restrict replies to a specific channel */
+  /** Optional: restrict replies to a specific channel. */
   channel_id?: string;
 }
 

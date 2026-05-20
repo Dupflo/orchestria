@@ -1,5 +1,10 @@
 import { sendTelegramMessage } from "./handlers/telegram";
 import { postWebhookReply } from "./handlers/webhook";
+import {
+  editDiscordInteractionReply,
+  sendDiscordChannelMessage,
+  resolveDiscordSecrets,
+} from "./handlers/discord";
 import { tryLoadChannelConfig } from "./config";
 import { listSubscribers } from "./subscribers";
 import { buildMissionOutput } from "../remote/output";
@@ -59,7 +64,35 @@ async function deliverInboundReply(info: MissionInfo): Promise<void> {
     return;
   }
 
-  // discord: not yet implemented
+  if (config.type === "discord") {
+    // Preferred path: PATCH the deferred interaction reply (works ≤15 min).
+    const appId = typeof info.sourceMeta?.application_id === "string"
+      ? info.sourceMeta.application_id
+      : config.application_id;
+    const token = typeof info.sourceMeta?.interaction_token === "string"
+      ? info.sourceMeta.interaction_token
+      : null;
+    if (token && appId) {
+      try {
+        await editDiscordInteractionReply(appId, token, output);
+        return;
+      } catch (e) {
+        console.warn(`[channels] discord follow-up edit failed for ${info.missionId}, falling back to channel send:`, e);
+      }
+    }
+
+    // Fallback: post a fresh message via the bot token (no interaction window).
+    const channelId = typeof info.sourceMeta?.channel_id === "string"
+      ? info.sourceMeta.channel_id
+      : config.channel_id;
+    const { botToken } = resolveDiscordSecrets(config);
+    if (!channelId || !botToken) {
+      console.warn(`[channels] discord reply missing channel_id or bot token for ${info.missionId}`);
+      return;
+    }
+    await sendDiscordChannelMessage(botToken, channelId, output);
+    return;
+  }
 }
 
 /**
