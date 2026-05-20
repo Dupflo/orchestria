@@ -210,16 +210,46 @@ function ChatPageContent() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [thinkingStep, setThinkingStep] = useState<string | null>(null);
+  // Per-agent in-flight tracking so a running mission on agent A does not
+  // freeze the chat input for every other agent (the symptom was "I have to
+  // refresh to talk to someone else").
+  const [busyAgents, setBusyAgents] = useState<Set<string>>(new Set());
+  const [thinkingByAgent, setThinkingByAgent] = useState<Map<string, string>>(new Map());
+  const busy = agentId ? busyAgents.has(agentId) : false;
+  const thinkingStep = agentId ? thinkingByAgent.get(agentId) ?? null : null;
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [mode, setMode] = useState<ChatMode>("question");
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const sseRef = useRef<EventSource | null>(null);
+  // One EventSource per in-flight chat mission so switching agents does not
+  // tear down the stream that still needs to update the originating bubble.
+  const ssesRef = useRef<Map<string, EventSource>>(new Map());
+  // Latest viewed agentId, read from SSE callbacks (closure-captured values
+  // would be stale once the user navigates).
+  const agentIdRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { agentIdRef.current = agentId; }, [agentId]);
+
+  const markBusy = (aid: string, b: boolean) => {
+    setBusyAgents((prev) => {
+      if (b ? prev.has(aid) : !prev.has(aid)) return prev;
+      const next = new Set(prev);
+      if (b) next.add(aid); else next.delete(aid);
+      return next;
+    });
+  };
+  const setThinkingFor = (aid: string, step: string | null) => {
+    setThinkingByAgent((prev) => {
+      const cur = prev.get(aid) ?? null;
+      if (cur === step) return prev;
+      const next = new Map(prev);
+      if (step === null) next.delete(aid); else next.set(aid, step);
+      return next;
+    });
+  };
 
   // load agents
   useEffect(() => {
@@ -270,7 +300,9 @@ function ChatPageContent() {
     setSessionId(null);
     setViewSession(null);
     setSessionMenuOpen(false);
-    sseRef.current?.close();
+    // Intentionally NOT closing in-flight EventSources here — missions for
+    // other agents keep streaming so their final result lands when the user
+    // navigates back to them.
     reloadHistory();
     reloadSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -288,7 +320,10 @@ function ChatPageContent() {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages, busy, thinkingStep]);
 
-  useEffect(() => () => sseRef.current?.close(), []);
+  useEffect(() => () => {
+    for (const es of ssesRef.current.values()) es.close();
+    ssesRef.current.clear();
+  }, []);
 
   // close session menu on outside click / Escape
   useEffect(() => {
@@ -325,32 +360,43 @@ function ChatPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
 
-  // mission SSE for the currently-streaming mission
-  const attachSse = (mid: string, agentBubbleId: string) => {
-    sseRef.current?.close();
+  // One SSE per running mission. `forAgentId` is the agent that owns the
+  // mission — kept around so callbacks can update only that agent's state
+  // (busy / thinking / sessionId) even after the user navigates elsewhere.
+  const attachSse = (mid: string, agentBubbleId: string, forAgentId: string) => {
     const es = new EventSource(`/api/missions/${mid}/stream`);
-    sseRef.current = es;
+    ssesRef.current.set(mid, es);
     let lastResultText: string | null = null;
-    setThinkingStep("loading context");
+    setThinkingFor(forAgentId, "loading context");
     es.onmessage = (msg) => {
       const ev = JSON.parse(msg.data) as SseEvent;
+      const isCurrent = agentIdRef.current === forAgentId;
       const p = ev.payload as { session_id?: string } | null;
-      if (p?.session_id && !sessionId) setSessionId(p.session_id);
+      // Only touch the shared sessionId when the user is viewing this agent —
+      // otherwise we'd overwrite another agent's session pill.
+      if (isCurrent && p?.session_id) {
+        const sid = p.session_id;
+        setSessionId((prev) => prev ?? sid);
+      }
 
-      if (ev.type === "system") setThinkingStep("loading context");
-      else if (ev.type === "tool_use" || ev.type === "tool_result") setThinkingStep("running tool");
-      else if (ev.type === "assistant") setThinkingStep("drafting response");
+      if (ev.type === "system") setThinkingFor(forAgentId, "loading context");
+      else if (ev.type === "tool_use" || ev.type === "tool_result") setThinkingFor(forAgentId, "running tool");
+      else if (ev.type === "assistant") setThinkingFor(forAgentId, "drafting response");
 
       if (ev.type === "MissionComplete") {
+        // The bubble only exists in `messages` when the user is viewing
+        // `forAgentId`; if they navigated away, this map is a no-op (the
+        // persisted result will be picked up by reloadHistory on return).
         setMessages((prev) => prev.map((m) =>
           m.id === agentBubbleId
             ? { ...m, text: lastResultText ?? m.text, streaming: false, status: "done" }
             : m
         ));
-        setBusy(false);
-        setThinkingStep(null);
-        reloadSessions();
+        markBusy(forAgentId, false);
+        setThinkingFor(forAgentId, null);
+        if (isCurrent) reloadSessions();
         es.close();
+        ssesRef.current.delete(mid);
         return;
       }
 
@@ -366,10 +412,13 @@ function ChatPageContent() {
 
   const send = async () => {
     const text = input.trim();
-    if (!text || !agentId || busy) return;
-    setBusy(true);
+    if (!text || !agentId || busyAgents.has(agentId)) return;
+    // Pin the originating agent so an in-flight navigation does not redirect
+    // the busy/thinking state onto another agent.
+    const forAgentId = agentId;
+    markBusy(forAgentId, true);
     setInput("");
-    setThinkingStep("routing intent");
+    setThinkingFor(forAgentId, "routing intent");
 
     const tempUserId = `u_tmp_${Date.now()}`;
     const tempAgentId = `a_tmp_${Date.now()}`;
@@ -383,7 +432,7 @@ function ChatPageContent() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        agent_name: agentId,
+        agent_name: forAgentId,
         mission: text,
         // Resume the session currently in view (historic or latest). null when viewer is in "new chat".
         resume_session_id: viewSession ?? sessionId ?? undefined,
@@ -402,15 +451,15 @@ function ChatPageContent() {
       setMessages((prev) => prev
         .filter((m) => m.id !== tempAgentId)
         .concat({ id: `s_${Date.now()}`, who: "system", text: errText, ts: Date.now() / 1000 }));
-      setBusy(false);
-      setThinkingStep(null);
+      markBusy(forAgentId, false);
+      setThinkingFor(forAgentId, null);
       return;
     }
     const json = (await res.json()) as { mission_id: string };
     setMessages((prev) => prev.map((m) =>
       m.id === tempAgentId ? { ...m, missionId: json.mission_id } : m
     ));
-    attachSse(json.mission_id, tempAgentId);
+    attachSse(json.mission_id, tempAgentId, forAgentId);
   };
 
   const switchAgent = (id: string) => {
