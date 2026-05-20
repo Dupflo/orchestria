@@ -117,7 +117,63 @@ export function nextRun(cron: ParsedCron, fromMs: number): number {
   throw new Error(`no fire time within 4 years for cron: ${JSON.stringify(cron)}`);
 }
 
-/** Convert a cron expr to a human-readable phrase (best-effort, French). */
+const pad = (s: string): string => s.padStart(2, "0");
+
+/** Join with Oxford-style "and" so phrases read naturally in English. */
+function joinNice(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+}
+
+/**
+ * Render the (minute, hour) pair of a cron expression as natural English.
+ * The previous version pasted the raw fields together (e.g. `at 6-21:7,37`),
+ * which leaked cron jargon into the UI. Common patterns now have first-class
+ * handling; anything exotic still falls back to the raw `H:M` form.
+ */
+function renderTime(m: string, h: string): string {
+  if (h === "*" && m === "*") return "every minute";
+  if (h === "*" && m.startsWith("*/")) return `every ${m.slice(2)} min`;
+  if (h.startsWith("*/") && m === "0") return `every ${h.slice(2)}h`;
+  if (h === "*" && /^\d+$/.test(m)) return `at :${pad(m)} every hour`;
+
+  const isSingle = (s: string) => /^\d+$/.test(s);
+  const isList   = (s: string) => /^\d+(?:,\d+)+$/.test(s);
+  const isRange  = (s: string) => /^\d+-\d+$/.test(s);
+
+  // Both fields are concrete clock components → render full HH:MM times.
+  if (isSingle(m) && isSingle(h)) return `at ${pad(h)}:${pad(m)}`;
+  if (isSingle(m) && isList(h)) {
+    return `at ${joinNice(h.split(",").map((hh) => `${pad(hh)}:${pad(m)}`))}`;
+  }
+  if (isSingle(m) && isRange(h)) {
+    const [a, b] = h.split("-");
+    return `at :${pad(m)} every hour from ${pad(a)}h to ${pad(b)}h`;
+  }
+  if (isList(m) && isSingle(h)) {
+    return `at ${joinNice(m.split(",").map((mm) => `${pad(h)}:${pad(mm)}`))}`;
+  }
+  if (isList(m) && isRange(h)) {
+    const [a, b] = h.split("-");
+    const mins = joinNice(m.split(",").map((mm) => `:${pad(mm)}`));
+    return `at ${mins} every hour from ${pad(a)}h to ${pad(b)}h`;
+  }
+  if (isList(m) && isList(h)) {
+    const all: string[] = [];
+    for (const hh of h.split(",")) for (const mm of m.split(",")) all.push(`${pad(hh)}:${pad(mm)}`);
+    return `at ${joinNice(all)}`;
+  }
+  if (isRange(m) && isSingle(h)) {
+    const [ma, mb] = m.split("-");
+    return `from ${pad(h)}:${pad(ma)} to ${pad(h)}:${pad(mb)}`;
+  }
+
+  // Unhandled mix (step within a range, etc.) — keep raw so we don't lie.
+  return `${h}:${m}`;
+}
+
+/** Convert a cron expr to a human-readable phrase (best-effort, English). */
 export function describeCron(expr: string): string {
   try {
     const f = expr.trim().split(/\s+/);
@@ -131,16 +187,7 @@ export function describeCron(expr: string): string {
     else if (dom !== "*") day = `day ${dom}`;
     if (mon !== "*") day += ` (mon ${mon})`;
 
-    let time = "";
-    if (h === "*" && m === "*") time = "every minute";
-    else if (h === "*" && m.startsWith("*/")) time = `every ${m.slice(2)} min`;
-    else if (h.startsWith("*/") && m === "0") time = `every ${h.slice(2)}h`;
-    else if (h !== "*" && m !== "*" && !h.includes("/") && !m.includes("/")) {
-      time = `at ${h.padStart(2, "0")}:${m.padStart(2, "0")}`;
-    } else {
-      time = `${h}:${m}`;
-    }
-    return `${day} · ${time}`;
+    return `${day} · ${renderTime(m, h)}`;
   } catch {
     return expr;
   }
