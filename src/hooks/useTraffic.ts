@@ -34,13 +34,19 @@ export function useTraffic(
       const interval = 1000 / rate;
       while (now - lastSpawn.current > interval) {
         lastSpawn.current += interval;
+        // Weight links by the activity of the TARGET (the agent actually
+        // doing work), not the source. Otherwise a single active orchestrator
+        // lights up every outgoing link and you can't see which sub-agent is
+        // running. With a target-driven weight, only the link reaching the
+        // busy sub-agent pulses, so "where the action is" is visible at a
+        // glance.
         const candidates = links.map((l, i) => {
-          const src = agents[l.s];
-          const a = agentMap[src.id];
+          const tgt = agents[l.t];
+          const status = agentMap[tgt.id]?.status;
           const mult =
-            a.status === "active" ? 1
-            : a.status === "waiting" ? 0.2
-            : a.status === "err" ? 0.1
+            status === "active" ? 1
+            : status === "waiting" ? 0.2
+            : status === "err" ? 0.1
             : 0;
           return { i, w: l.w * mult };
         });
@@ -50,8 +56,8 @@ export function useTraffic(
         let pick = candidates[0];
         for (const c of candidates) { r -= c.w; if (r <= 0) { pick = c; break; } }
         const lvls: Pulse["lvl"][] = ["info", "info", "info", "tool", "ok", "ok", "warn", "err"];
-        const a = agentMap[agents[links[pick.i].s].id];
-        const lvl: Pulse["lvl"] = a.status === "err" ? "err" : lvls[Math.floor(Math.random() * lvls.length)];
+        const a = agentMap[agents[links[pick.i].t].id];
+        const lvl: Pulse["lvl"] = a?.status === "err" ? "err" : lvls[Math.floor(Math.random() * lvls.length)];
         pulses.current.push({ linkIdx: pick.i, t: 0, lvl, born: now });
         if (pulses.current.length > 80) pulses.current.shift();
       }
