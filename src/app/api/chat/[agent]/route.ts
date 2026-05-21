@@ -35,21 +35,43 @@ interface ChatMessage {
 }
 
 function extractAssistantText(events: EventRow[]): string {
+  // First pass — prefer the canonical "this is the final answer" event each
+  // provider emits, scanned newest-first:
+  //   Claude: kind === "result" with payload.result
+  //   Codex:  kind === "item.completed" with item.type === "agent_message"
   for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].kind === "result") {
-      const p = safeJson<{ result?: string }>(events[i].body, {});
+    const e = events[i];
+    if (e.kind === "result") {
+      const p = safeJson<{ result?: string }>(e.body, {});
       if (typeof p.result === "string") return p.result;
     }
+    if (e.kind === "item.completed") {
+      const p = safeJson<{ item?: { type?: string; text?: string; content?: string } }>(e.body, {});
+      const item = p.item;
+      if (item && (item.type === "agent_message" || item.type === "assistant_message")) {
+        if (typeof item.text === "string") return item.text;
+        if (typeof item.content === "string") return item.content;
+      }
+    }
   }
+  // Fallback — stitch streamed chunks (Claude `assistant` events) or flat
+  // `agent_message` events that some Codex builds emit at the top level.
   const parts: string[] = [];
   for (const e of events) {
-    if (e.kind !== "assistant") continue;
-    const p = safeJson<{ message?: { content?: Array<{ type?: string; text?: string }> } }>(e.body, {});
-    const content = p.message?.content;
-    if (Array.isArray(content)) {
-      for (const c of content) {
-        if (c?.type === "text" && typeof c.text === "string") parts.push(c.text);
+    if (e.kind === "assistant") {
+      const p = safeJson<{ message?: { content?: Array<{ type?: string; text?: string }> } }>(e.body, {});
+      const content = p.message?.content;
+      if (Array.isArray(content)) {
+        for (const c of content) {
+          if (c?.type === "text" && typeof c.text === "string") parts.push(c.text);
+        }
       }
+      continue;
+    }
+    if (e.kind === "agent_message" || e.kind === "assistant_message") {
+      const p = safeJson<{ text?: string; content?: string }>(e.body, {});
+      if (typeof p.text === "string") parts.push(p.text);
+      else if (typeof p.content === "string") parts.push(p.content);
     }
   }
   return parts.join("");

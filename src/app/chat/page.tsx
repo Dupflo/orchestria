@@ -53,9 +53,10 @@ type ChatMode = "question" | "mission" | "routine";
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function extractStreamingText(ev: SseEvent): string | null {
+  // ── Claude CLI shapes ────────────────────────────────────────────────────
   if (ev.type === "result") {
     const p = ev.payload as { result?: string };
-    return typeof p.result === "string" ? p.result : null;
+    if (typeof p.result === "string") return p.result;
   }
   if (ev.type === "assistant") {
     const p = ev.payload as { message?: { content?: Array<{ type?: string; text?: string }> } };
@@ -67,6 +68,25 @@ function extractStreamingText(ev: SseEvent): string | null {
       }
       if (parts.length) return parts.join("");
     }
+  }
+  // ── Codex CLI shapes (`codex exec --json`) ───────────────────────────────
+  // Streamed agent messages arrive as item.updated (partial) and item.completed
+  // (final), each carrying the *cumulative* text under `item.text`. Command
+  // executions also flow through these event types — gate on item.type so we
+  // don't overwrite the bubble with shell output.
+  if (ev.type === "item.updated" || ev.type === "item.completed") {
+    const p = ev.payload as { item?: { type?: string; text?: string; content?: string } };
+    const item = p.item;
+    if (item && (item.type === "agent_message" || item.type === "assistant_message")) {
+      if (typeof item.text === "string") return item.text;
+      if (typeof item.content === "string") return item.content;
+    }
+  }
+  // Some Codex builds emit a flat `agent_message` event with text at top level.
+  if (ev.type === "agent_message" || ev.type === "assistant_message") {
+    const p = ev.payload as { text?: string; content?: string };
+    if (typeof p.text === "string") return p.text;
+    if (typeof p.content === "string") return p.content;
   }
   return null;
 }
@@ -400,11 +420,13 @@ function ChatPageContent() {
     es.onmessage = (msg) => {
       const ev = JSON.parse(msg.data) as SseEvent;
       const isCurrent = agentIdRef.current === forAgentId;
-      const p = ev.payload as { session_id?: string } | null;
+      // Session id lives under different keys across providers — `session_id`
+      // for Claude, `thread_id` for Codex. Try the common ones.
+      const p = ev.payload as { session_id?: string; thread_id?: string; conversation_id?: string } | null;
+      const sid = p?.session_id ?? p?.thread_id ?? p?.conversation_id ?? null;
       // Only touch the shared sessionId when the user is viewing this agent —
       // otherwise we'd overwrite another agent's session pill.
-      if (isCurrent && p?.session_id) {
-        const sid = p.session_id;
+      if (isCurrent && typeof sid === "string" && sid) {
         setSessionId((prev) => prev ?? sid);
       }
 
@@ -422,11 +444,20 @@ function ChatPageContent() {
         // The bubble only exists in `messages` when the user is viewing
         // `forAgentId`; if they navigated away, this map is a no-op (the
         // persisted result will be picked up by reloadHistory on return).
-        setMessages((prev) => prev.map((m) =>
-          m.id === agentBubbleId
-            ? { ...m, text: lastResultText ?? m.text, streaming: false, status: "done" }
-            : m
-        ));
+        const cp = ev.payload as { status?: string; exitCode?: number } | null;
+        const finalStatus = cp?.status === "failed" ? "failed" : "done";
+        setMessages((prev) => prev.map((m) => {
+          if (m.id !== agentBubbleId) return m;
+          // If we never captured any agent text but the mission ended,
+          // surface a hint pointing at /missions — otherwise the bubble
+          // would be silently empty (common with a CLI that errored out
+          // before emitting any structured event, e.g. unknown codex flag).
+          const text = lastResultText ?? m.text;
+          const filled = text || (finalStatus === "failed"
+            ? `_⚠ Mission failed (exit ${cp?.exitCode ?? "?"}). The CLI produced no agent output — open this mission in /missions to see the raw stderr._`
+            : text);
+          return { ...m, text: filled, streaming: false, status: finalStatus };
+        }));
         markBusy(forAgentId, false);
         setThinkingFor(forAgentId, null);
         setRunningFor(forAgentId, null);

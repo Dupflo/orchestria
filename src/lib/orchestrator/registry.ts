@@ -114,6 +114,21 @@ class AgentRegistry {
       }
     });
 
+    // Persist non-JSON lines too — CLI errors (unknown flags, panics, prompts
+    // for confirmation) never reach `agent.on("event")` because they aren't
+    // structured events, so without this they were dropped on the floor and
+    // a chat bubble would stay empty with no clue why. Capped at ~200 raw
+    // lines per mission so a runaway log doesn't bloat the DB.
+    let rawCount = 0;
+    agent.on("raw", (line: string) => {
+      if (rawCount >= 200) return;
+      rawCount++;
+      const stamp = Date.now();
+      const payload = { line };
+      insertEvent.run(missionId, agentName, Math.floor(stamp / 1000), "raw", JSON.stringify(payload));
+      sseBroadcast(missionId, { type: "raw", timestamp: stamp, payload }, agentName);
+    });
+
 
     agent.on("done", (exitCode: number) => {
       clearTimeout(timeoutTimer);
